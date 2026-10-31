@@ -122,7 +122,38 @@ app.post('/borrows', async (req, res) => {
     res.send(result);
   });
 
- 
+  //  update
+  
+  
+app.patch('/books/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const updatedData = req.body;
+
+    const filter = {
+      _id: new ObjectId(id),
+    };
+
+    const updateDoc = {
+      $set: {
+        ...updatedData,
+        updatedAt: new Date(),
+      },
+    };
+
+    const result = await bookCollection.updateOne(filter, updateDoc);
+
+    res.send(result);
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).send({
+      success: false,
+      message: 'Failed to update book',
+    });
+  }
+});
+
   
   app.listen(port, () => {
     console.log(`Example app listening on port ${port}`);
