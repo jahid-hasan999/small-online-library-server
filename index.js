@@ -22,6 +22,7 @@ const startserver = async () => {
   await connectToMongoDB();
   const db = client.db('onlinelibrary');
   const bookCollection = db.collection('books')
+  const borrowCollection = db.collection('borrows');
 
   //add books
   app.post('/books', async (req, res) => {
@@ -56,6 +57,50 @@ const startserver = async () => {
     res.send(result);
   });
 
+  // add brrows 
+  app.post('/borrows', async (req, res) => {
+    try {
+      const { bookId, bookTitle, bookImage, userEmail } = req.body;
+
+      const borrowDate = new Date();
+
+      const returnDate = new Date();
+      returnDate.setDate(returnDate.getDate() + 7);
+
+      const borrowData = {
+        bookId,
+        bookTitle,
+        bookImage,
+        userEmail,
+        borrowDate,
+        returnDate,
+      };
+
+      const result = await borrowCollection.insertOne(borrowData);
+
+      res.status(201).send({
+        success: true,
+        message: 'Book borrowed successfully!',
+        insertedId: result.insertedId,
+      });
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).send({
+        success: false,
+        message: 'Failed to borrow book',
+      });
+    }
+  });
+
+  // get brrows 
+  app.get("/borrows", async (req, res) => {
+    const data = await borrowCollection.find().toArray();
+    res.send(data);
+  })
+
+ 
+  
   app.listen(port, () => {
     console.log(`Example app listening on port ${port}`);
   });
