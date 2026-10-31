@@ -58,46 +58,69 @@ const startserver = async () => {
   });
 
   // add brrows 
-  app.post('/borrows', async (req, res) => {
-    try {
-      const { bookId, bookTitle, bookImage, userEmail } = req.body;
+ 
+app.post('/borrows', async (req, res) => {
+  try {
+    const { bookId, bookTitle, bookImage, userEmail } = req.body;
+    const alreadyBorrowed = await borrowCollection.findOne({
+      bookId: bookId,
+    });
 
-      const borrowDate = new Date();
-
-      const returnDate = new Date();
-      returnDate.setDate(returnDate.getDate() + 7);
-
-      const borrowData = {
-        bookId,
-        bookTitle,
-        bookImage,
-        userEmail,
-        borrowDate,
-        returnDate,
-      };
-
-      const result = await borrowCollection.insertOne(borrowData);
-
-      res.status(201).send({
-        success: true,
-        message: 'Book borrowed successfully!',
-        insertedId: result.insertedId,
-      });
-    } catch (error) {
-      console.error(error);
-
-      res.status(500).send({
+    if (alreadyBorrowed) {
+      return res.status(409).send({
         success: false,
-        message: 'Failed to borrow book',
+        message: 'This book is already borrowed!',
       });
     }
-  });
+
+    // Borrow date
+    const borrowDate = new Date();
+    const returnDate = new Date();
+    returnDate.setDate(returnDate.getDate() + 7);
+
+    const borrowData = {
+      bookId,
+      bookTitle,
+      bookImage,
+      userEmail,
+      borrowDate,
+      returnDate,
+    };
+
+    const result = await borrowCollection.insertOne(borrowData);
+
+    res.status(201).send({
+      success: true,
+      message: 'Book borrowed successfully!',
+      insertedId: result.insertedId,
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).send({
+      success: false,
+      message: 'Failed to borrow book',
+    });
+  }
+});
+
 
   // get brrows 
   app.get("/borrows", async (req, res) => {
     const data = await borrowCollection.find().toArray();
     res.send(data);
   })
+
+  // delete 
+  app.delete('/borrows/:id', async (req, res) => {
+    const id = req.params.id;
+
+    const result = await borrowCollection.deleteOne({
+      _id: new ObjectId(id),
+    });
+
+    res.send(result);
+  });
 
  
   
