@@ -122,7 +122,7 @@ app.post('/borrows', async (req, res) => {
     res.send(result);
   });
 
-  //  update
+  // my update
   
   
 app.patch('/books/:id', async (req, res) => {
@@ -154,6 +154,25 @@ app.patch('/books/:id', async (req, res) => {
   }
 });
 
+  // my book delete 
+  app.delete('/books/:id', async (req, res) => {
+    try {
+      const id = req.params.id;
+
+      const result = await bookCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+
+      res.send(result);
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).send({
+        success: false,
+        message: 'Failed to delete book',
+      });
+    }
+  });
   
   app.listen(port, () => {
     console.log(`Example app listening on port ${port}`);
