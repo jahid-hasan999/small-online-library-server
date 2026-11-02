@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors"
 import 'dotenv/config';
 import { MongoClient, ObjectId } from 'mongodb';
+import { createRemoteJWKSet, jwtVerify } from "jose";
 const app = express()
 app.use(cors());
 app.use(express.json());
@@ -24,8 +25,29 @@ const startserver = async () => {
   const bookCollection = db.collection('books')
   const borrowCollection = db.collection('borrows');
 
+  // add verifytoken
+
+  const verifyToken = async (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).send({ msg: "Unuthorized!" });
+    }
+      const token = authHeader.split(" ")[1]
+      if (!token) {
+        return res.status(401).send({ msg: 'Unuthorized!' });
+    }
+    
+    const jwks = createRemoteJWKSet(
+      new URL('http://localhost:3000/api/auth/jwks'),
+    );
+
+    const { payload } = await jwtVerify(token, jwks);
+    req.user = payload;
+    next();
+  }
+
   //add books
-  app.post('/books', async (req, res) => {
+  app.post('/books', verifyToken,async (req, res) => {
     const data = req.body;
 
       const book = {
@@ -51,7 +73,7 @@ const startserver = async () => {
     res.send(books);
   });
 
-  app.get("/books/:id", async (req, res) => {
+  app.get("/books/:id", verifyToken,async (req, res) => {
     const id = req.params.id;
     const result = await bookCollection.findOne({ _id: new ObjectId(id) })
     res.send(result);
@@ -59,22 +81,36 @@ const startserver = async () => {
 
   // add brrows 
  
-app.post('/borrows', async (req, res) => {
+app.post('/borrows', verifyToken, async (req, res) => {
   try {
-    const { bookId, bookTitle, bookImage, userEmail } = req.body;
+    const { bookId, bookTitle, bookImage } = req.body;
+
+    // Get logged-in user's email from verified JWT
+    const userEmail = req.user?.email;
+
+    if (!userEmail) {
+      return res.status(401).send({
+        success: false,
+        message: 'Unauthorized user!',
+      });
+    }
+
+    // Check if THIS user already borrowed THIS book
     const alreadyBorrowed = await borrowCollection.findOne({
       bookId: bookId,
+      userEmail: userEmail,
     });
 
     if (alreadyBorrowed) {
       return res.status(409).send({
         success: false,
-        message: 'This book is already borrowed!',
+        message: 'You have already borrowed this book!',
       });
     }
 
     // Borrow date
     const borrowDate = new Date();
+
     const returnDate = new Date();
     returnDate.setDate(returnDate.getDate() + 7);
 
@@ -95,7 +131,7 @@ app.post('/borrows', async (req, res) => {
       insertedId: result.insertedId,
     });
   } catch (error) {
-    console.error(error);
+    console.error('Borrow Error:', error);
 
     res.status(500).send({
       success: false,
@@ -106,32 +142,38 @@ app.post('/borrows', async (req, res) => {
 
 
   // get brrows 
-  app.get("/borrows", async (req, res) => {
-    const data = await borrowCollection.find().toArray();
+  app.get("/borrows", verifyToken, async (req, res) => {
+    
+    const userEmail = req.user.email;
+    const data = await borrowCollection.find({ userEmail }).toArray();
     res.send(data);
   })
 
   // delete 
-  app.delete('/borrows/:id', async (req, res) => {
-    const id = req.params.id;
+ app.delete('/borrows/:id', verifyToken, async (req, res) => {
+   const id = req.params.id;
+   const userEmail = req.user.email;
 
-    const result = await borrowCollection.deleteOne({
-      _id: new ObjectId(id),
-    });
+   const result = await borrowCollection.deleteOne({
+     _id: new ObjectId(id),
+     userEmail: userEmail,
+   });
 
-    res.send(result);
-  });
+   res.send(result);
+ });
 
   // my update
   
-  
-app.patch('/books/:id', async (req, res) => {
+app.patch('/books/:id', verifyToken, async (req, res) => {
   try {
     const id = req.params.id;
-    const updatedData = req.body;
+    const userEmail = req.user.email;
+
+    const { addedBy, createdAt, ...updatedData } = req.body;
 
     const filter = {
       _id: new ObjectId(id),
+      'addedBy.email': userEmail,
     };
 
     const updateDoc = {
@@ -142,6 +184,13 @@ app.patch('/books/:id', async (req, res) => {
     };
 
     const result = await bookCollection.updateOne(filter, updateDoc);
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({
+        success: false,
+        message: 'Book not found or you are not the owner',
+      });
+    }
 
     res.send(result);
   } catch (error) {
@@ -155,13 +204,22 @@ app.patch('/books/:id', async (req, res) => {
 });
 
   // my book delete 
-  app.delete('/books/:id', async (req, res) => {
+  app.delete('/books/:id', verifyToken, async (req, res) => {
     try {
       const id = req.params.id;
+      const userEmail = req.user.email;
 
       const result = await bookCollection.deleteOne({
         _id: new ObjectId(id),
+        'addedBy.email': userEmail,
       });
+
+      if (result.deletedCount === 0) {
+        return res.status(404).send({
+          success: false,
+          message: 'Book not found or you are not the owner',
+        });
+      }
 
       res.send(result);
     } catch (error) {
