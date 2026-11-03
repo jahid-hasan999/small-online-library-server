@@ -1,42 +1,64 @@
-import express from "express";
-import cors from "cors"
+import express from 'express';
+import cors from 'cors';
 import 'dotenv/config';
 import { MongoClient, ObjectId } from 'mongodb';
-import { createRemoteJWKSet, jwtVerify } from "jose";
-const app = express()
+import { createRemoteJWKSet, jwtVerify } from 'jose';
+const app = express();
 app.use(cors());
 app.use(express.json());
-const port = 5000
+const port = 5000;
 
-// connect mongodv 
+// connect mongodv
 const client = new MongoClient(process.env.MONGO_DB_CLIENT_ID);
 
+// connection cache (serverless-e bar bar connect na kore ekbar-i connect hobe)
+let connectPromise = null;
+
 export async function connectToMongoDB() {
-
-    await client.connect();
-    console.log('You successfully connected to MongoDB!');
-    return client;
+  if (!connectPromise) {
+    connectPromise = client
+      .connect()
+      .then(() => {
+        console.log('You successfully connected to MongoDB!');
+        return client;
+      })
+      .catch(err => {
+        connectPromise = null;
+        throw err;
+      });
   }
-  
-const startserver = async () => {
-    
-  await connectToMongoDB();
-  const db = client.db('onlinelibrary');
-  const bookCollection = db.collection('books')
-  const borrowCollection = db.collection('borrows');
+  return connectPromise;
+}
 
-  // add verifytoken
+// db & collections (top level e, jate routes sathe sathe register hoy)
+const db = client.db('onlinelibrary');
+const bookCollection = db.collection('books');
+const borrowCollection = db.collection('borrows');
 
-  const verifyToken = async (req, res, next) => {
+// prottek request er age DB connected ache kina nischit kore
+app.use(async (req, res, next) => {
+  try {
+    await connectToMongoDB();
+    next();
+  } catch (error) {
+    console.error('MongoDB connection error:', error);
+    res.status(500).send({ msg: 'Database connection failed' });
+  }
+});
+
+// add verifytoken
+
+const verifyToken = async (req, res, next) => {
+  try {
     const authHeader = req.headers.authorization;
     if (!authHeader) {
-      return res.status(401).send({ msg: "Unuthorized!" });
+      return res.status(401).send({ msg: 'Unuthorized!' });
     }
-      const token = authHeader.split(" ")[1]
-      if (!token) {
-        return res.status(401).send({ msg: 'Unuthorized!' });
+    const token = authHeader.split(' ')[1];
+    if (!token) {
+      return res.status(401).send({ msg: 'Unuthorized!' });
     }
-    
+
     const jwks = createRemoteJWKSet(
       new URL(`${process.env.CLIENT_ID}/api/auth/jwks`),
     );
@@ -44,43 +66,46 @@ const startserver = async () => {
     const { payload } = await jwtVerify(token, jwks);
     req.user = payload;
     next();
+  } catch (error) {
+    console.error('Token error:', error);
+    return res.status(401).send({ msg: 'Unuthorized!' });
+  }
+};
+
+//add books
+app.post('/books', verifyToken, async (req, res) => {
+  const data = req.body;
+  const book = {
+    ...data,
+    createdAt: new Date(),
+  };
+  const result = await bookCollection.insertOne(book);
+  res.send(result);
+});
+
+// get books
+app.get('/books', async (req, res) => {
+  const limit = Number(req.query.limit);
+
+  let query = bookCollection.find().sort({ createdAt: -1 });
+
+  if (limit > 0) {
+    query = query.limit(limit);
   }
 
-  //add books
-  app.post('/books', verifyToken,async (req, res) => {
-    const data = req.body;
+  const books = await query.toArray();
 
-      const book = {
-        ...data,
-        createdAt: new Date(),
-      };
-    const result = await bookCollection.insertOne(book)
-    res.send(result);
-})
+  res.send(books);
+});
 
-  // get books
-  app.get('/books', async (req, res) => {
-    const limit = Number(req.query.limit);
+app.get('/books/:id', verifyToken, async (req, res) => {
+  const id = req.params.id;
+  const result = await bookCollection.findOne({ _id: new ObjectId(id) });
+  res.send(result);
+});
 
-    let query = bookCollection.find().sort({ createdAt: -1 });
+// add brrows
 
-    if (limit > 0) {
-      query = query.limit(limit);
-    }
-
-    const books = await query.toArray();
-
-    res.send(books);
-  });
-
-  app.get("/books/:id", verifyToken,async (req, res) => {
-    const id = req.params.id;
-    const result = await bookCollection.findOne({ _id: new ObjectId(id) })
-    res.send(result);
-  });
-
-  // add brrows 
- 
 app.post('/borrows', verifyToken, async (req, res) => {
   try {
     const { bookId, bookTitle, bookImage } = req.body;
@@ -140,30 +165,28 @@ app.post('/borrows', verifyToken, async (req, res) => {
   }
 });
 
+// get brrows
+app.get('/borrows', verifyToken, async (req, res) => {
+  const userEmail = req.user.email;
+  const data = await borrowCollection.find({ userEmail }).toArray();
+  res.send(data);
+});
 
-  // get brrows 
-  app.get("/borrows", verifyToken, async (req, res) => {
-    
-    const userEmail = req.user.email;
-    const data = await borrowCollection.find({ userEmail }).toArray();
-    res.send(data);
-  })
+// delete
+app.delete('/borrows/:id', verifyToken, async (req, res) => {
+  const id = req.params.id;
+  const userEmail = req.user.email;
 
-  // delete 
- app.delete('/borrows/:id', verifyToken, async (req, res) => {
-   const id = req.params.id;
-   const userEmail = req.user.email;
+  const result = await borrowCollection.deleteOne({
+    _id: new ObjectId(id),
+    userEmail: userEmail,
+  });
 
-   const result = await borrowCollection.deleteOne({
-     _id: new ObjectId(id),
-     userEmail: userEmail,
-   });
+  res.send(result);
+});
 
-   res.send(result);
- });
+// my update
 
-  // my update
-  
 app.patch('/books/:id', verifyToken, async (req, res) => {
   try {
     const id = req.params.id;
@@ -203,37 +226,41 @@ app.patch('/books/:id', verifyToken, async (req, res) => {
   }
 });
 
-  // my book delete 
-  app.delete('/books/:id', verifyToken, async (req, res) => {
-    try {
-      const id = req.params.id;
-      const userEmail = req.user.email;
+// my book delete
+app.delete('/books/:id', verifyToken, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const userEmail = req.user.email;
 
-      const result = await bookCollection.deleteOne({
-        _id: new ObjectId(id),
-        'addedBy.email': userEmail,
-      });
+    const result = await bookCollection.deleteOne({
+      _id: new ObjectId(id),
+      'addedBy.email': userEmail,
+    });
 
-      if (result.deletedCount === 0) {
-        return res.status(404).send({
-          success: false,
-          message: 'Book not found or you are not the owner',
-        });
-      }
-
-      res.send(result);
-    } catch (error) {
-      console.error(error);
-
-      res.status(500).send({
+    if (result.deletedCount === 0) {
+      return res.status(404).send({
         success: false,
-        message: 'Failed to delete book',
+        message: 'Book not found or you are not the owner',
       });
     }
-  });
-  
+
+    res.send(result);
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).send({
+      success: false,
+      message: 'Failed to delete book',
+    });
+  }
+});
+
+// local e chalate listen, Vercel e listen lagbe na
+if (!process.env.VERCEL) {
   app.listen(port, () => {
     console.log(`Example app listening on port ${port}`);
   });
 }
-startserver();
+
+// Vercel er jonno must
+export default app;
