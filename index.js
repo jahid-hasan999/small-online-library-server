@@ -64,6 +64,10 @@ const verifyToken = async (req, res, next) => {
     );
 
     const { payload } = await jwtVerify(token, jwks);
+    console.log({
+      name: payload.name,
+      email: payload.email,
+    });
     req.user = payload;
     next();
   } catch (error) {
@@ -74,13 +78,38 @@ const verifyToken = async (req, res, next) => {
 
 //add books
 app.post('/books', verifyToken, async (req, res) => {
-  const data = req.body;
+  const { title, author, category, image, description } = req.body;
+
+  const userEmail = req.user?.email;
+  const userName = req.user?.name;
+
+  if (!userEmail) {
+    return res.status(401).send({
+      success: false,
+      message: 'Unauthorized user!',
+    });
+  }
+
   const book = {
-    ...data,
+    title,
+    author,
+    category,
+    image,
+    description,
+    addedBy: {
+      name: userName,
+      email: userEmail,
+    },
     createdAt: new Date(),
   };
+
   const result = await bookCollection.insertOne(book);
-  res.send(result);
+
+  res.status(201).send({
+    success: true,
+    message: 'Book added successfully!',
+    insertedId: result.insertedId,
+  });
 });
 
 // get books
