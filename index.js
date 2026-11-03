@@ -68,7 +68,7 @@ const verifyToken = async (req, res, next) => {
       name: payload.name,
       email: payload.email,
     });
-    req.user = payload;
+  req.user = { name: payload.name, email: payload.email };
     next();
   } catch (error) {
     console.error('Token error:', error);
